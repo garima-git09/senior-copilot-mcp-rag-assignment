@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements-test.txt') }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-test.txt
+          pip install ruff mypy bandit
+
+      - name: Lint (ruff)
+        run: ruff check apps connectors mcp-servers rag tests
+
+      - name: Format check (ruff format)
+        run: ruff format --check apps connectors mcp-servers rag tests
+
+      - name: Static analysis (mypy, non-blocking)
+        run: mypy apps/backend connectors --ignore-missing-imports || true
+
+      - name: Security scan (bandit, non-blocking)
+        run: bandit -q -r apps connectors mcp-servers rag -x "**/tests/**" || true
+
+      - name: Build the RAG retrieval index
+        run: python -m rag.ingestion.index_builder --documents ./rag/documents --index ./rag/index/local
+
+      - name: Run unit tests
+        run: pytest tests/unit -v
+
+      - name: Run RAG tests (ingestion + retrieval + prompt injection)
+        run: pytest rag/tests -v
+
+      - name: Run MCP + orchestration integration tests
+        run: pytest tests/integration -v
+
+      - name: Run end-to-end test
+        env:
+          LLM_PROVIDER: anthropic
+          LLM_API_KEY: ci-placeholder-key
+        run: pytest tests/e2e -v
+
+      - name: Coverage report
+        run: |
+          pytest tests/ rag/tests/ \
+            --cov=apps/backend --cov=connectors --cov=app --cov=server --cov=rag/ingestion --cov=rag/retrieval \
+            --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  docker-build-validation:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Copy sample env file
+        run: cp .env.example .env
+
+      - name: Build all service images
+        run: docker compose build

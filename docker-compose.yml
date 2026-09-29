@@ -1,0 +1,80 @@
+services:
+  alarm-api:
+    build:
+      context: .
+      dockerfile: apps/alarm-api/Dockerfile
+    container_name: alarm-api
+    environment:
+      ALARM_API_TOKEN: ${ALARM_API_TOKEN:-demo-token}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  alarm-mcp:
+    build:
+      context: .
+      dockerfile: mcp-servers/alarm-management/Dockerfile
+    container_name: alarm-mcp
+    environment:
+      ALARM_API_BASE_URL: http://alarm-api:8000
+      ALARM_API_TOKEN: ${ALARM_API_TOKEN:-demo-token}
+      MCP_SERVER_HOST: 0.0.0.0
+      MCP_SERVER_PORT: "9000"
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "9000:9000"
+    depends_on:
+      alarm-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=2)"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  copilot-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: copilot-backend
+    environment:
+      MCP_SERVER_URL: http://alarm-mcp:9000/mcp
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-5-20250929}
+      VECTOR_STORE_URL: /app/rag/index/local
+      DOCUMENT_PATH: /app/rag/documents
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MIN_SCORE: ${RAG_MIN_SCORE:-0.35}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    ports:
+      - "8080:8080"
+    depends_on:
+      alarm-mcp:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: copilot-frontend
+    environment:
+      COPILOT_BACKEND_URL: http://copilot-backend:8080
+    ports:
+      - "8501:8501"
+    depends_on:
+      copilot-backend:
+        condition: service_healthy

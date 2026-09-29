@@ -1,0 +1,14 @@
+# Aggregated dependencies for running the full test suite locally / in CI.
+# Each service also has its own requirements.txt for its Docker image;
+# this file exists purely so `pytest` can exercise all of them together
+# from one environment (see Makefile `test` target and .github/workflows/ci.yml).
+-r apps/alarm-api/requirements.txt
+-r apps/backend/requirements.txt
+-r apps/frontend/requirements.txt
+-r mcp-servers/alarm-management/requirements.txt
+-r rag/requirements.txt
+
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.28.1
